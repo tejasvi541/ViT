@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  pytorch-app:
+    image: pytorch-gpu # This is the image name created by the build command
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./:/app # Bind mount the current directory to the /llama2 directory in the container
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all # Allow access to all GPUs
+    runtime: nvidia # GPU runtime
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true # Equivalent to -i, keeps STDIN open
+    tty: true # Equivalent to -t, enables interactive shell
+    # command: bash # Runs bash shell to interact with container
