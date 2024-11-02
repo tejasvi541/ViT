@@ -5,10 +5,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-from torch.data.util import DataLoader, Dataset
-from torchvision import transforms
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
 from sklearn.model_selection import train_test_split
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import random
@@ -34,7 +34,7 @@ HIDDEN_DIM = 768
 ADAM_WEIGHT_DECAY = 0
 ADAM_BETAS = (0.9, 0.999)
 ACTIVATION = "gelu"
-NUM_ENCODER = 6
+NUM_ENCODER = 2
 EMBED_DIM = (PATCH_SIZE**2) * IN_CHANNELS  # 768
 NUM_PATCHES = (IMAGE_SIZE // PATCH_SIZE) ** 2  # 196
 
@@ -48,6 +48,20 @@ torch.backends.cudnn.benchmark = False
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+
+##
+## Define ImageNet Transform and DataLoader
+##
+transform = transforms.Compose([
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.ToTensor(),
+])
+
+# Assuming ImageNet data is available in the `data_path` directory.
+# data_path = "/path/to/imagenet"  # Modify with your actual data path
+# train_dataset = datasets.ImageNet(root=data_path, split='train', transform=transform)
+# train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
 ##
 ## Embedding Layer
@@ -136,3 +150,81 @@ class PatchEmbedding(nn.Module):
         x = self.dropout(x)
 
         return x
+
+
+class ViT(nn.Module):
+    def __init__(
+        self,
+        num_patches,
+        num_classes,
+        patch_size,
+        embed_dim,
+        num_heads,
+        hidden_dim,
+        num_layers,
+        dropout,
+        activation,
+        in_channels,
+    ):
+        super().__init__()
+        self.patch_embedding = PatchEmbedding(
+            embed_dim, patch_size, num_patches, dropout, in_channels
+        )
+        self.encode = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=embed_dim,
+                nhead=num_heads,
+                dim_feedforward=hidden_dim,
+                dropout=dropout,
+                activation=activation,
+                batch_first=True,
+                norm_first=True,
+            ),
+            num_layers=num_layers,
+        )
+        self.mlp = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            nn.Linear(embed_dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, num_classes),
+        )
+
+    def forward(self, x):
+        x = self.patch_embedding(x)
+        x = self.encode(x)
+        x = self.mlp(x[:, 0, :])
+        return x
+
+
+model = ViT(
+    num_patches=NUM_PATCHES,
+    num_classes=NUM_CLASSES,
+    patch_size=PATCH_SIZE,
+    embed_dim=EMBED_DIM,
+    num_heads=NUM_HEADS,
+    hidden_dim=HIDDEN_DIM,
+    num_layers=NUM_ENCODER,
+    dropout=DROPOUT,
+    activation=ACTIVATION,
+    in_channels=IN_CHANNELS,
+).to(device)
+
+x = torch.randn(BATCH_SIZE, IN_CHANNELS, IMAGE_SIZE, IMAGE_SIZE).to(device)
+# print(model)  # BATCH_SIZE X NUM_CLASSES
+from prettytable import PrettyTable
+
+def count_parameters(model):
+    table = PrettyTable(["Modules", "Parameters"])
+    total_params = 0
+    for name, parameter in model.named_parameters():
+        if not parameter.requires_grad:
+            continue
+        params = parameter.numel()
+        table.add_row([name, params])
+        total_params += params
+    print(table)
+    print(f"Total Trainable Params: {total_params}")
+    return total_params
+    
+count_parameters(model)
