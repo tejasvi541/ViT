@@ -59,9 +59,9 @@ transform = transforms.Compose([
 ])
 
 # Assuming ImageNet data is available in the `data_path` directory.
-# data_path = "/path/to/imagenet"  # Modify with your actual data path
-# train_dataset = datasets.ImageNet(root=data_path, split='train', transform=transform)
-# train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+data_path = "/path/to/imagenet"  # Modify with your actual data path
+train_dataset = datasets.ImageNet(root=data_path, split='train', transform=transform)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
 ##
 ## Embedding Layer
