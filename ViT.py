@@ -24,7 +24,7 @@ RANDOM_SEED = 42
 LEARNING_RATE = 0.0001
 BATCH_SIZE = 512
 EPOCHS = 50
-NUM_CLASSES = 1000
+NUM_CLASSES = 256
 PATCH_SIZE = 16
 IMAGE_SIZE = 224
 IN_CHANNELS = 3
@@ -47,21 +47,6 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-
-##
-## Define ImageNet Transform and DataLoader
-##
-transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
-    transforms.ToTensor(),
-])
-
-# Assuming ImageNet data is available in the `data_path` directory.
-data_path = "/path/to/imagenet"  # Modify with your actual data path
-train_dataset = datasets.ImageNet(root=data_path, split='train', transform=transform)
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
 
 ##
 ## Embedding Layer

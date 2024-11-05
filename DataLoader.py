@@ -1,15 +1,42 @@
 import os
-import json
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
+from torchvision.datasets.utils import download_and_extract_archive
+import glob
 
 ##
 ## Define Hyperparameters and Paths
 ##
-IMAGE_SIZE = 224  # Size to which each image will be resized (224x224 is standard for vision transformers)
+IMAGE_SIZE = 224  # Resize each image to 224x224, typical for vision transformers
 BATCH_SIZE = 512  # Number of images per batch during training/testing
-data_path = "/path/to/imagenet"  # Update this to the actual directory where ImageNet is stored
+data_path = "./data/caltech256"  # Path where Caltech-256 data will be stored
+
+# URL for downloading the Caltech-256 dataset archive
+URL = "https://data.caltech.edu/records/nyy15-4j048/files/256_ObjectCategories.tar"
+
+##
+## Download and Extract Caltech-256 Dataset
+##
+def download_caltech256(root, url=URL):
+    """
+    Download and extract the Caltech-256 dataset if it's not already present.
+
+    Parameters:
+    - root (str): Directory where the dataset will be stored
+    - url (str): URL of the dataset archive
+    """
+    # Check if dataset directory exists
+    if not os.path.exists(os.path.join(root, "256_ObjectCategories")):
+        os.makedirs(root, exist_ok=True)
+        # Download and extract dataset
+        download_and_extract_archive(url, download_root=root)
+        print("Caltech-256 dataset downloaded and extracted successfully.")
+    else:
+        print("Caltech-256 dataset already exists.")
+
+# Download dataset if not already present
+download_caltech256(data_path)
 
 ##
 ## Define Image Transformation Pipeline and DataLoader
@@ -20,66 +47,39 @@ transform = transforms.Compose([
 ])
 
 ##
-## Custom ImageNet Dataset Class
+## Custom Caltech-256 Dataset Class
 ##
-class ImageNetKaggle(Dataset):
+class Caltech256Dataset(Dataset):
     """
-    Custom Dataset class for loading ImageNet images and their corresponding labels.
+    Custom Dataset class for loading Caltech-256 images and their corresponding labels.
 
-    This class supports training, validation, and testing splits. It assumes the ImageNet directory has:
-    - A subdirectory for each split ('train', 'val', and 'test'), containing images organized by class for training.
-    - JSON files to map synset IDs to class IDs for validation and testing splits.
+    This class assumes the Caltech-256 directory has images organized in folders named by class IDs (e.g., '001.ak47').
 
     Attributes:
-    - root (str): Base directory where ImageNet data is stored.
-    - split (str): Data split to load ('train', 'val', or 'test').
+    - root (str): Base directory where Caltech-256 data is stored.
     - transform: Transformations applied to each image.
     - samples (list): List of image file paths.
     - targets (list): Corresponding labels for each image.
-    - syn_to_class (dict): Mapping from synset IDs to integer class labels.
-    - val_to_syn (dict): Mapping from validation image file names to synset IDs.
+    - class_to_idx (dict): Mapping from class names to integer labels.
     """
-    def __init__(self, root, split='train', transform=None):
+    def __init__(self, root, transform=None):
         self.samples = []       # List to store file paths for each image in the dataset
         self.targets = []       # List to store corresponding class labels for each image
         self.transform = transform  # Transformations applied to each image
-        self.syn_to_class = {}  # Mapping from synset ID (e.g., 'n01440764') to integer class label (0, 1, ...)
+        self.class_to_idx = {}  # Mapping from class folder names to integer class labels
 
-        # Load class index JSON for mapping synset to class ID (required for validation and testing)
-        with open(os.path.join(root, "imagenet_class_index.json"), "r") as f:
-            json_file = json.load(f)
-            # Populate syn_to_class dictionary, which maps synset IDs to class IDs
-            for class_id, v in json_file.items():
-                self.syn_to_class[v[0]] = int(class_id)
+        # Check if root directory exists
+        if not os.path.isdir(root):
+            raise FileNotFoundError(f"Directory not found: {root}")
 
-        # For validation and testing, load additional JSON mapping validation images to synset IDs
-        if split == "val" or split == "test":
-            with open(os.path.join(root, "ILSVRC2012_val_labels.json"), "r") as f:
-                self.val_to_syn = json.load(f)
-
-        # Directory for the specific data split (train/val/test) under the ILSVRC dataset directory
-        samples_dir = os.path.join(root, "ILSVRC/Data/CLS-LOC", split)
-
-        # Populate samples and targets lists based on the data split
-        for entry in os.listdir(samples_dir):
-            if split == "train":
-                # In training, each class has its own folder, identified by synset ID
-                syn_id = entry  # Folder name is the synset ID
-                target = self.syn_to_class.get(syn_id, None)
-                if target is not None:
-                    syn_folder = os.path.join(samples_dir, syn_id)  # Path to images for this synset ID
-                    for sample in os.listdir(syn_folder):
-                        sample_path = os.path.join(syn_folder, sample)
-                        self.samples.append(sample_path)  # Add image path to samples
-                        self.targets.append(target)       # Add corresponding target label to targets
-            elif split == "val" or split == "test":
-                # For validation and testing, images are directly in the folder and need mapping to class labels
-                syn_id = self.val_to_syn.get(entry, None)  # Look up synset ID using file name
-                target = self.syn_to_class.get(syn_id, None)
-                if target is not None:
-                    sample_path = os.path.join(samples_dir, entry)
-                    self.samples.append(sample_path)  # Add image path to samples
-                    self.targets.append(target)       # Add corresponding target label to targets
+        # Populate class_to_idx dictionary and samples/targets lists
+        for idx, class_name in enumerate(sorted(os.listdir(root))):
+            class_dir = os.path.join(root, class_name)
+            if os.path.isdir(class_dir):
+                self.class_to_idx[class_name] = idx  # Map class name to index
+                for img_path in glob.glob(os.path.join(class_dir, "*.jpg")):
+                    self.samples.append(img_path)  # Add image path to samples
+                    self.targets.append(idx)       # Add corresponding target label to targets
 
     def __len__(self):
         """
@@ -108,19 +108,21 @@ class ImageNetKaggle(Dataset):
         return x, self.targets[idx]
 
 ##
-## Instantiate Datasets and DataLoaders for Train, Validation, and Test
+## Instantiate Dataset and DataLoader
 ##
 
-# Instantiate the training dataset and DataLoader
-train_dataset = ImageNetKaggle(root=data_path, split='train', transform=transform)
+# Instantiate the full dataset
+dataset = Caltech256Dataset(root=os.path.join(data_path, "256_ObjectCategories"), transform=transform)
+
+# Split the dataset into train (80%), validation (10%), and test (10%) sets
+train_size = int(0.8 * len(dataset))
+val_size = int(0.1 * len(dataset))
+test_size = len(dataset) - train_size - val_size
+train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+
+# Create DataLoaders for each split
 train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
-
-# Instantiate the validation dataset and DataLoader
-val_dataset = ImageNetKaggle(root=data_path, split='val', transform=transform)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
-
-# Instantiate the test dataset and DataLoader
-test_dataset = ImageNetKaggle(root=data_path, split='test', transform=transform)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # Example usage: Iterating over the train_loader

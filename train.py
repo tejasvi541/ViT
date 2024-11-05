@@ -4,7 +4,7 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from DataLoader import train_dataloader, val_dataloader  # Import the dataloaders
+from DataLoader import train_loader, val_loader, test_loader  # Import the dataloaders
 from ViT import ViT  # Import the ViT model
 
 # Set random seed for reproducibility
@@ -15,7 +15,7 @@ torch.manual_seed(RANDOM_SEED)
 LEARNING_RATE = 0.0001
 BATCH_SIZE = 512
 EPOCHS = 50
-NUM_CLASSES = 1000
+NUM_CLASSES = 256
 PATCH_SIZE = 16
 IMAGE_SIZE = 224
 IN_CHANNELS = 3
@@ -37,80 +37,127 @@ model = ViT(num_classes=NUM_CLASSES, patch_size=PATCH_SIZE, in_channels=IN_CHANN
             num_heads=NUM_HEADS, hidden_dim=HIDDEN_DIM, dropout=DROPOUT,
             activation=ACTIVATION, num_encoder=NUM_ENCODER, embed_dim=EMBED_DIM).to(device)
 
-# Define the loss function and optimizer
-criterion = nn.CrossEntropyLoss()  # Loss function for multi-class classification
-optimizer = optim.Adam(model.parameters(), betas=ADAM_BETAS, lr=LEARNING_RATE, weight_decay=ADAM_WEIGHT_DECAY)
+# Optimizer and Loss Function
+optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=ADAM_BETAS, weight_decay=ADAM_WEIGHT_DECAY)
+criterion = nn.CrossEntropyLoss()
 
-# Start timing the training process
-start = timeit.default_timer()
+# Function to train the model for one epoch
+def train_one_epoch(model, train_loader, optimizer, criterion, device):
+    """
+    Trains the model for one epoch.
 
-# Training loop
-for epoch in tqdm(range(EPOCHS), position=0, leave=True):
-    model.train()  # Set the model to training mode
-    train_labels = []
-    train_preds = []
-    train_running_loss = 0
-    
-    # Iterate over training batches
-    for idx, img_label in enumerate(tqdm(train_dataloader, position=0, leave=True)):
-        img = img_label["image"].float().to(device)  # Move image to device (GPU/CPU)
-        label = img_label["label"].type(torch.long).to(device)  # Move label to device
-        
-        # Forward pass
-        y_pred = model(img)  # Get predictions from the model
-        y_pred_label = torch.argmax(y_pred, dim=1)  # Get the predicted class labels
+    Parameters:
+    - model: The ViT model being trained.
+    - train_loader: DataLoader for training data.
+    - optimizer: Optimizer for updating model parameters.
+    - criterion: Loss function (CrossEntropyLoss).
+    - device: Device to use for computation ('cuda' or 'cpu').
 
-        # Store true and predicted labels for accuracy calculation
-        train_labels.extend(label.cpu().detach().numpy())
-        train_preds.extend(y_pred_label.cpu().detach().numpy())
-        
-        # Calculate the loss
-        loss = criterion(y_pred, label)
-        
-        optimizer.zero_grad()  # Zero the gradients
-        loss.backward()  # Backpropagate the loss
-        optimizer.step()  # Update the model parameters
+    Returns:
+    - average_train_loss: Average loss across the epoch.
+    - train_accuracy: Accuracy across the training set.
+    """
+    model.train()  # Set model to training mode
+    running_loss = 0.0
+    correct_predictions = 0
+    total_samples = 0
 
-        train_running_loss += loss.item()  # Accumulate the loss
+    # Loop through batches in the training data
+    for images, labels in tqdm(train_loader, desc="Training", leave=False):
+        images, labels = images.to(device), labels.to(device)
 
-    # Calculate average training loss for this epoch
-    train_loss = train_running_loss / (idx + 1)
+        # Forward pass: Compute model output and calculate loss
+        outputs = model(images)
+        loss = criterion(outputs, labels)
 
-    # Validation loop
-    model.eval()  # Set the model to evaluation mode
-    val_labels = []
-    val_preds = []
-    val_running_loss = 0
-    
-    with torch.no_grad():  # No gradient calculation during validation
-        for idx, img_label in enumerate(tqdm(val_dataloader, position=0, leave=True)):
-            img = img_label["image"].float().to(device)
-            label = img_label["label"].type(torch.long).to(device)         
-            y_pred = model(img)  # Get predictions for validation data
-            y_pred_label = torch.argmax(y_pred, dim=1)  # Get predicted class labels
-            
-            # Store true and predicted labels for accuracy calculation
-            val_labels.extend(label.cpu().detach().numpy())
-            val_preds.extend(y_pred_label.cpu().detach().numpy())
-            
-            # Calculate the loss
-            loss = criterion(y_pred, label)
-            val_running_loss += loss.item()  # Accumulate the validation loss
+        # Zero gradients, backward pass, and optimizer step
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
-    # Calculate average validation loss for this epoch
-    val_loss = val_running_loss / (idx + 1)
+        # Track the loss and accuracy
+        running_loss += loss.item() * images.size(0)
+        _, predicted = torch.max(outputs, 1)
+        correct_predictions += (predicted == labels).sum().item()
+        total_samples += labels.size(0)
 
-    # Print training and validation statistics
-    print("-"*30)
-    print(f"Train Loss EPOCH {epoch+1}: {train_loss:.4f}")
-    print(f"Valid Loss EPOCH {epoch+1}: {val_loss:.4f}")
-    print(f"Train Accuracy EPOCH {epoch+1}: {sum(1 for x,y in zip(train_preds, train_labels) if x == y) / len(train_labels):.4f}")
-    print(f"Valid Accuracy EPOCH {epoch+1}: {sum(1 for x,y in zip(val_preds, val_labels) if x == y) / len(val_labels):.4f}")
-    print("-"*30)
+    # Calculate average loss and accuracy
+    average_train_loss = running_loss / total_samples
+    train_accuracy = correct_predictions / total_samples
 
-# End timing the training process
-stop = timeit.default_timer()
-print(f"Training Time: {stop-start:.2f}s")
+    return average_train_loss, train_accuracy
 
-# Save the trained model
-torch.save(model.state_dict(), "ViT_trained_model.pth")
+
+# Function to validate the model
+def validate(model, val_loader, criterion, device):
+    """
+    Validates the model on the validation dataset.
+
+    Parameters:
+    - model: The ViT model being validated.
+    - val_loader: DataLoader for validation data.
+    - criterion: Loss function (CrossEntropyLoss).
+    - device: Device to use for computation ('cuda' or 'cpu').
+
+    Returns:
+    - average_val_loss: Average loss across the validation set.
+    - val_accuracy: Accuracy across the validation set.
+    """
+    model.eval()  # Set model to evaluation mode
+    running_loss = 0.0
+    correct_predictions = 0
+    total_samples = 0
+
+    with torch.no_grad():  # Disable gradient calculation
+        for images, labels in tqdm(val_loader, desc="Validating", leave=False):
+            images, labels = images.to(device), labels.to(device)
+
+            # Forward pass and loss calculation
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+            # Track the loss and accuracy
+            running_loss += loss.item() * images.size(0)
+            _, predicted = torch.max(outputs, 1)
+            correct_predictions += (predicted == labels).sum().item()
+            total_samples += labels.size(0)
+
+    # Calculate average loss and accuracy
+    average_val_loss = running_loss / total_samples
+    val_accuracy = correct_predictions / total_samples
+
+    return average_val_loss, val_accuracy
+
+
+# Training loop for multiple epochs
+train_losses = []
+val_losses = []
+train_accuracies = []
+val_accuracies = []
+
+for epoch in range(1, EPOCHS + 1):
+    print(f"\nEpoch {epoch}/{EPOCHS}")
+
+    # Train and validate for this epoch
+    train_loss, train_accuracy = train_one_epoch(model, train_loader, optimizer, criterion, device)
+    val_loss, val_accuracy = validate(model, val_loader, criterion, device)
+
+    # Append results for analysis
+    train_losses.append(train_loss)
+    val_losses.append(val_loss)
+    train_accuracies.append(train_accuracy)
+    val_accuracies.append(val_accuracy)
+
+    # Feedback: Display epoch summary
+    print(f"Epoch [{epoch}/{EPOCHS}] - "
+          f"Train Loss: {train_loss:.4f}, Train Accuracy: {train_accuracy:.4%} - "
+          f"Val Loss: {val_loss:.4f}, Val Accuracy: {val_accuracy:.4%}")
+
+    # Improved feedback: Save checkpoint if validation improves
+    if epoch == 1 or val_accuracy > max(val_accuracies[:-1]):
+        torch.save(model.state_dict(), f"best_model_epoch_{epoch}.pth")
+        print(f"Model saved for epoch {epoch} with val accuracy: {val_accuracy:.4%}")
+
+# Save final model
+torch.save(model.state_dict(), "final_model.pth")
+print("Training complete. Final model saved.")
