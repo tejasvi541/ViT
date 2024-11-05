@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.optim as optim
 from DataLoader import train_loader, val_loader, test_loader  # Import the dataloaders
 from ViT import ViT  # Import the ViT model
+import numpy as np
 
 # Set random seed for reproducibility
 RANDOM_SEED = 42
@@ -13,9 +14,9 @@ torch.manual_seed(RANDOM_SEED)
 
 # Hyperparameters
 LEARNING_RATE = 0.0001
-BATCH_SIZE = 512
+BATCH_SIZE = 128
 EPOCHS = 50
-NUM_CLASSES = 256
+NUM_CLASSES = 257
 PATCH_SIZE = 16
 IMAGE_SIZE = 224
 IN_CHANNELS = 3
@@ -25,7 +26,7 @@ HIDDEN_DIM = 768
 ADAM_WEIGHT_DECAY = 0
 ADAM_BETAS = (0.9, 0.999)
 ACTIVATION = "gelu"
-NUM_ENCODER = 2
+NUM_ENCODER = 4
 EMBED_DIM = (PATCH_SIZE**2) * IN_CHANNELS  # For the ViT model
 NUM_PATCHES = (IMAGE_SIZE // PATCH_SIZE) ** 2  # Number of patches in the image
 
@@ -33,9 +34,18 @@ NUM_PATCHES = (IMAGE_SIZE // PATCH_SIZE) ** 2  # Number of patches in the image
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # Initialize the ViT model
-model = ViT(num_classes=NUM_CLASSES, patch_size=PATCH_SIZE, in_channels=IN_CHANNELS,
-            num_heads=NUM_HEADS, hidden_dim=HIDDEN_DIM, dropout=DROPOUT,
-            activation=ACTIVATION, num_encoder=NUM_ENCODER, embed_dim=EMBED_DIM).to(device)
+model = ViT(
+    num_patches=NUM_PATCHES,
+    num_classes=NUM_CLASSES,
+    patch_size=PATCH_SIZE,
+    embed_dim=EMBED_DIM,
+    num_heads=NUM_HEADS,
+    hidden_dim=HIDDEN_DIM,
+    num_layers=NUM_ENCODER,
+    dropout=DROPOUT,
+    activation=ACTIVATION,
+    in_channels=IN_CHANNELS,
+).to(device)
 
 # Optimizer and Loss Function
 optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, betas=ADAM_BETAS, weight_decay=ADAM_WEIGHT_DECAY)
@@ -115,6 +125,9 @@ def validate(model, val_loader, criterion, device):
             # Forward pass and loss calculation
             outputs = model(images)
             loss = criterion(outputs, labels)
+
+            print("Target labels:", labels)  # Debugging line
+            print("Model outputs:", outputs)
 
             # Track the loss and accuracy
             running_loss += loss.item() * images.size(0)

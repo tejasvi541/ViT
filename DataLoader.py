@@ -4,12 +4,13 @@ from torch.utils.data import Dataset, DataLoader, random_split
 from torchvision import transforms
 from torchvision.datasets.utils import download_and_extract_archive
 import glob
-
+import numpy as np
+import torch
 ##
 ## Define Hyperparameters and Paths
 ##
 IMAGE_SIZE = 224  # Resize each image to 224x224, typical for vision transformers
-BATCH_SIZE = 512  # Number of images per batch during training/testing
+BATCH_SIZE = 128  # Number of images per batch during training/testing
 data_path = "./data/caltech256"  # Path where Caltech-256 data will be stored
 
 # URL for downloading the Caltech-256 dataset archive
@@ -42,8 +43,11 @@ download_caltech256(data_path)
 ## Define Image Transformation Pipeline and DataLoader
 ##
 transform = transforms.Compose([
-    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),  # Resize each image to IMAGE_SIZE x IMAGE_SIZE
-    transforms.ToTensor(),  # Convert image to a PyTorch tensor (normalized to [0, 1])
+    transforms.Resize((IMAGE_SIZE, IMAGE_SIZE)),
+    transforms.RandomHorizontalFlip(),  # Randomly flip images horizontally
+    transforms.RandomRotation(10),  # Randomly rotate images by 10 degrees
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
 ])
 
 ##
@@ -73,7 +77,7 @@ class Caltech256Dataset(Dataset):
             raise FileNotFoundError(f"Directory not found: {root}")
 
         # Populate class_to_idx dictionary and samples/targets lists
-        for idx, class_name in enumerate(sorted(os.listdir(root))):
+        for idx, class_name in enumerate((os.listdir(root))):
             class_dir = os.path.join(root, class_name)
             if os.path.isdir(class_dir):
                 self.class_to_idx[class_name] = idx  # Map class name to index
@@ -121,13 +125,17 @@ test_size = len(dataset) - train_size - val_size
 train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
 
 # Create DataLoaders for each split
-train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 # Example usage: Iterating over the train_loader
 # This is just to check if the dataset loads correctly and will be removed during actual training
+labs = []
 for images, labels in train_loader:
     print(f"Batch of images has shape: {images.shape}")
     print(f"Batch of labels has shape: {labels.shape}")
+    print("Unique labels:", torch.unique(labels))
     break
+
+
